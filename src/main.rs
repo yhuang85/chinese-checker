@@ -1,6 +1,7 @@
 use std::process;
 
 use crossterm::style::Color;
+use game::Player;
 use tui::Screen;
 
 #[allow(dead_code)]
@@ -9,21 +10,37 @@ pub mod tui;
 
 fn main() {
     let mut cc = game::ChineseChecker::new(5);
-    for (name, color) in [
-        ("Green", Color::Green),
-        ("Red", Color::Red),
-        ("Blue", Color::Blue),
-        ("White", Color::White),
-        ("Yellow", Color::Yellow),
-        ("Magenta", Color::Magenta),
-    ] {
-        cc.add_player(String::from(name), color)
-            .unwrap_or_else(|err| {
-                eprintln!("{err}");
-                process::exit(1);
-            });
+    let players = vec![
+        Player::new(String::from("Green"), Color::Green),
+        Player::new(String::from("Red"), Color::Red),
+        // Player::new(String::from("Blue"), Color::Blue),
+        // Player::new(String::from("Yellow"), Color::Yellow),
+        // Player::new(String::from("White"), Color::White),
+        // Player::new(String::from("Magenta"), Color::Magenta),
+    ];
+
+    for player in players.iter() {
+        cc.add_player(player).unwrap_or_else(|err| {
+            eprintln!("{err}");
+            process::exit(1);
+        });
     }
     let mut screen = Screen::new(&cc);
-    screen.start().unwrap();
+    screen
+        .start(&cc, &players)
+        .unwrap_or_else(|err| eprintln!("{err}"));
+
+    // The game loop
+    for _ in 0..10 {
+        for player in &players {
+            let selected_move = player.select_move(&cc);
+            if let Some(m) = selected_move {
+                cc.play(player, &m);
+                screen
+                    .update(&player, &m)
+                    .unwrap_or_else(|err| eprintln!("{err}"));
+            }
+        }
+    }
     screen.close().unwrap();
 }

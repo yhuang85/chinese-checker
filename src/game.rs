@@ -5,8 +5,6 @@ use std::{
 
 use crossterm::style::Color;
 
-use crate::tui::Screen;
-
 // We use a coordinate system that is compatible with
 // the natural orientation of a terminal. Namely, the
 // origin (0, 0) is the upper-left corner of the screen
@@ -84,14 +82,14 @@ impl Position {
 }
 
 #[derive(Debug)]
-pub struct NodeAttr {
+pub struct Node {
     neighbors: [Option<Position>; 6],
     triangle: Option<u8>, // 0..6
 }
 
-impl NodeAttr {
+impl Node {
     fn new(position: Position, size: i16) -> Self {
-        NodeAttr {
+        Node {
             neighbors: [
                 (position + Position::from((-1, -1))).validate(size),
                 (position + Position::from((-2, 0))).validate(size),
@@ -107,41 +105,41 @@ impl NodeAttr {
 
 #[derive(Debug)]
 pub struct Player {
-    id: u8,
     pub name: String,
     pub color: Color,
-    pub positions: HashSet<Position>,
 }
 
 impl Player {
-    fn new(id: u8, name: String, color: Color) -> Self {
-        Player {
-            id,
-            name,
-            color,
-            positions: HashSet::new(),
-        }
+    pub fn new(name: String, color: Color) -> Self {
+        Player { name, color }
     }
 
-    fn select_move(&self, cc: &ChineseChecker) -> Option<Move> {
-        for choice in self.search_moves(cc) {
+    pub fn select_move(&self, cc: &ChineseChecker) -> Option<Move> {
+        for choice in self.find_all_moves(cc) {
             // For the moment, just return the first possible move
             return Some(choice);
         }
         None
     }
 
-    fn search_moves(&self, cc: &ChineseChecker) -> Vec<Move> {
+    fn find_all_moves(&self, cc: &ChineseChecker) -> Vec<Move> {
         let mut moves: Vec<Move> = vec![];
-        for from in self.positions.iter() {
+        for from in cc
+            .state
+            .get(&self.name)
+            .expect("Player is not found in the game.")
+            .positions
+            .iter()
+        {
             for to in cc
                 .nodes
                 .get(from)
-                .unwrap()
+                .expect("Start position is not found in the game.")
                 .neighbors
                 .iter()
                 .filter(|&to| to.is_some())
                 .map(|&to| to.unwrap())
+                .filter(|to| !cc.is_occupied(to))
             {
                 moves.push(Move {
                     from: *from,
@@ -155,17 +153,23 @@ impl Player {
 }
 
 #[derive(Debug)]
-struct Move {
-    from: Position,
-    to: Position,
-    path: Vec<Position>,
+pub struct PlayerState {
+    pub positions: HashSet<Position>,
+    target: HashSet<Position>,
+}
+
+#[derive(Debug)]
+pub struct Move {
+    pub from: Position,
+    pub to: Position,
+    pub path: Vec<Position>,
 }
 
 #[derive(Debug)]
 pub struct ChineseChecker {
     pub size: i16,
-    pub nodes: HashMap<Position, NodeAttr>,
-    pub players: Vec<Player>,
+    pub nodes: HashMap<Position, Node>,
+    pub state: HashMap<String, PlayerState>, // Positions each player holds
 }
 
 impl ChineseChecker {
@@ -174,7 +178,7 @@ impl ChineseChecker {
         let mut b = ChineseChecker {
             size,
             nodes: HashMap::new(),
-            players: vec![],
+            state: HashMap::new(),
         };
         let mut x: i16;
         let mut index: i16;
@@ -188,19 +192,23 @@ impl ChineseChecker {
             }
             for i in 0..=index {
                 let position = Position::from((x + 2 * i, y));
-                b.nodes.insert(position, NodeAttr::new(position, size));
+                b.nodes.insert(position, Node::new(position, size));
             }
         }
         b
     }
 
-    pub fn start(&mut self) {
-        for player in self.players.iter() {
-            if let Some(selected_move) = player.select_move(&self) {
-                // ERROR: This doesn't work because of borrowing rules
-                // player.positions.remove(&selected_move.from);
-            }
-        }
+    pub fn play(&mut self, player: &Player, selected_move: &Move) {
+        self.state
+            .get_mut(&player.name)
+            .expect("Player is not found in the game.")
+            .positions
+            .remove(&selected_move.from);
+        self.state
+            .get_mut(&player.name)
+            .expect("Player is not found in the game.")
+            .positions
+            .insert(selected_move.to);
     }
 
     fn get_positions_in_triangle(&self, triangle: u8) -> HashSet<Position> {
@@ -213,23 +221,31 @@ impl ChineseChecker {
         positions
     }
 
-    pub fn add_player(&mut self, name: String, color: Color) -> Result<(), &'static str> {
-        let num_players = self.players.len() as u8;
-        let result = match num_players {
-            0..=5 => Ok(self.players.push(Player {
-                id: num_players,
-                name,
-                color,
+    pub fn add_player(&mut self, player: &Player) -> Result<(), &'static str> {
+        let num_players = self.state.len() as u8;
+        let mut target = num_players + 1;
+        if num_players % 2 == 1 {
+            target = num_players - 1;
+        }
+        if num_players >= 6 {
+            return Err("The game cannot have more than 6 players.");
+        }
+        if self.state.contains_key(&player.name) {
+            return Err("Player name already exists");
+        }
+        self.state.insert(
+            String::from(&player.name),
+            PlayerState {
                 positions: self.get_positions_in_triangle(num_players),
-            })),
-            _ => Err("The game cannot have more than 6 players."),
-        };
-        result
+                target: self.get_positions_in_triangle(target),
+            },
+        );
+        Ok(())
     }
 
     fn is_occupied(&self, position: &Position) -> bool {
-        for player in self.players.iter() {
-            if player.positions.contains(position) {
+        for ps in self.state.values() {
+            if ps.positions.contains(position) {
                 return true;
             }
         }
