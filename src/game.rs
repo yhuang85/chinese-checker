@@ -1,9 +1,9 @@
+use crate::player::{Move, Player};
 use std::{
     collections::{HashMap, HashSet},
-    ops, vec,
+    hash::Hash,
+    ops,
 };
-
-use crossterm::style::Color;
 
 // We use a coordinate system that is compatible with
 // the natural orientation of a terminal. Namely, the
@@ -18,7 +18,7 @@ pub struct Position {
 impl ops::Add for Position {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: Self) -> Self {
         Position {
             x: self.x + rhs.x,
             y: self.y + rhs.y,
@@ -29,7 +29,7 @@ impl ops::Add for Position {
 impl ops::Sub for Position {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self::Output {
+    fn sub(self, rhs: Self) -> Self {
         Position {
             x: self.x - rhs.x,
             y: self.y - rhs.y,
@@ -61,29 +61,33 @@ impl Position {
         // Return the index of the triangle if the position is within one and None otherwise
         // The triangles are ordered as follows
         //   0
-        // 2   5
-        // 4   3
-        //   1
+        // 1   5
+        // 2   4
+        //   3
         if self.y < size {
             return Some(0);
         } else if self.x + self.y < 3 * size {
-            return Some(2);
-        } else if self.y - self.x > size {
-            return Some(4);
-        } else if self.y > 3 * size {
             return Some(1);
-        } else if self.x + self.y > 7 * size {
+        } else if self.y - self.x > size {
+            return Some(2);
+        } else if self.y > 3 * size {
             return Some(3);
+        } else if self.x + self.y > 7 * size {
+            return Some(4);
         } else if self.x - self.y > 3 * size {
             return Some(5);
         }
         None
     }
+
+    pub fn norm(&self) -> f32 {
+        (self.x as f32 * self.x as f32 / 3.0 + self.y as f32 * self.y as f32).sqrt()
+    }
 }
 
 #[derive(Debug)]
 pub struct Node {
-    neighbors: [Option<Position>; 6],
+    pub neighbors: [Option<Position>; 6],
     triangle: Option<u8>, // 0..6
 }
 
@@ -104,65 +108,9 @@ impl Node {
 }
 
 #[derive(Debug)]
-pub struct Player {
-    pub name: String,
-    pub color: Color,
-}
-
-impl Player {
-    pub fn new(name: String, color: Color) -> Self {
-        Player { name, color }
-    }
-
-    pub fn select_move(&self, cc: &ChineseChecker) -> Option<Move> {
-        for choice in self.find_all_moves(cc) {
-            // For the moment, just return the first possible move
-            return Some(choice);
-        }
-        None
-    }
-
-    fn find_all_moves(&self, cc: &ChineseChecker) -> Vec<Move> {
-        let mut moves: Vec<Move> = vec![];
-        for from in cc
-            .state
-            .get(&self.name)
-            .expect("Player is not found in the game.")
-            .positions
-            .iter()
-        {
-            for to in cc
-                .nodes
-                .get(from)
-                .expect("Start position is not found in the game.")
-                .neighbors
-                .iter()
-                .filter(|&to| to.is_some())
-                .map(|&to| to.unwrap())
-                .filter(|to| !cc.is_occupied(to))
-            {
-                moves.push(Move {
-                    from: *from,
-                    to,
-                    path: vec![*from, to],
-                })
-            }
-        }
-        moves
-    }
-}
-
-#[derive(Debug)]
 pub struct PlayerState {
     pub positions: HashSet<Position>,
-    target: HashSet<Position>,
-}
-
-#[derive(Debug)]
-pub struct Move {
-    pub from: Position,
-    pub to: Position,
-    pub path: Vec<Position>,
+    pub goal: HashSet<Position>,
 }
 
 #[derive(Debug)]
@@ -170,6 +118,7 @@ pub struct ChineseChecker {
     pub size: i16,
     pub nodes: HashMap<Position, Node>,
     pub state: HashMap<String, PlayerState>, // Positions each player holds
+    pub tips: [Position; 6],                 // The six tips of the boards
 }
 
 impl ChineseChecker {
@@ -179,6 +128,14 @@ impl ChineseChecker {
             size,
             nodes: HashMap::new(),
             state: HashMap::new(),
+            tips: [
+                Position::from((3 * size, 0)),
+                Position::from((0, size)),
+                Position::from((0, 3 * size)),
+                Position::from((3 * size, 4 * size)),
+                Position::from((6 * size, 3 * size)),
+                Position::from((6 * size, size)),
+            ],
         };
         let mut x: i16;
         let mut index: i16;
@@ -198,57 +155,125 @@ impl ChineseChecker {
         b
     }
 
-    pub fn play(&mut self, player: &Player, selected_move: &Move) {
-        self.state
+    pub fn make_move(&mut self, player: &Player, mv: &Move) {
+        let positions = &mut self
+            .state
             .get_mut(&player.name)
             .expect("Player is not found in the game.")
-            .positions
-            .remove(&selected_move.from);
-        self.state
-            .get_mut(&player.name)
-            .expect("Player is not found in the game.")
-            .positions
-            .insert(selected_move.to);
+            .positions;
+
+        positions.remove(&mv.from);
+        positions.insert(mv.to);
     }
 
     fn get_positions_in_triangle(&self, triangle: u8) -> HashSet<Position> {
-        let positions: HashSet<Position> = self
-            .nodes
+        self.nodes
             .iter()
             .filter(|&node| node.1.triangle == Some(triangle))
             .map(|node| *node.0)
-            .collect();
-        positions
+            .collect::<HashSet<Position>>()
     }
 
-    pub fn add_player(&mut self, player: &Player) -> Result<(), &'static str> {
-        let num_players = self.state.len() as u8;
-        let mut target = num_players + 1;
-        if num_players % 2 == 1 {
-            target = num_players - 1;
-        }
-        if num_players >= 6 {
-            return Err("The game cannot have more than 6 players.");
+    pub fn add_player(&mut self, player: &Player) {
+        if self.state.len() >= 6 {
+            panic!("The game cannot have more than 6 players.");
         }
         if self.state.contains_key(&player.name) {
-            return Err("Player name already exists");
+            panic!("Player {} already exists in the game.", player.name);
         }
         self.state.insert(
             String::from(&player.name),
             PlayerState {
-                positions: self.get_positions_in_triangle(num_players),
-                target: self.get_positions_in_triangle(target),
+                positions: self.get_positions_in_triangle(player.triangle),
+                goal: self.get_positions_in_triangle((player.triangle + 3) % 6),
             },
         );
-        Ok(())
     }
 
-    fn is_occupied(&self, position: &Position) -> bool {
+    pub fn is_occupied(&self, position: &Position) -> bool {
         for ps in self.state.values() {
             if ps.positions.contains(position) {
                 return true;
             }
         }
         false
+    }
+
+    fn get_all_neighbors(&self, position: &Position) -> [Option<Position>; 6] {
+        self.nodes
+            .get(position)
+            .expect(&format!(
+                "Position {:?} is not found on the board.",
+                position
+            ))
+            .neighbors
+    }
+
+    fn get_valid_neighbors(&self, position: &Position) -> Vec<Position> {
+        self.nodes
+            .get(position)
+            .expect(&format!(
+                "Position {:?} is not found on the board.",
+                position
+            ))
+            .neighbors
+            .iter()
+            .filter(|&p| p.is_some())
+            .map(|p| p.unwrap())
+            .collect::<Vec<Position>>()
+    }
+
+    pub fn adjacent_unoccupied_positions(&self, position: &Position) -> HashSet<Position> {
+        self.get_valid_neighbors(position)
+            .iter()
+            .filter(|&p| !self.is_occupied(p))
+            .map(|p| *p)
+            .collect::<HashSet<Position>>()
+    }
+
+    fn opposite(&self, center: &Position, leg: &Position) -> Option<Position> {
+        let index = self
+            .get_all_neighbors(center)
+            .iter()
+            .position(|&p| p == Some(*leg))
+            .expect(&format!("{:?} is not a neighbor of {:?}.", leg, center));
+        self.get_all_neighbors(center)[(index + 3) % 6]
+    }
+
+    pub fn jumpable_positions(&self, position: &Position) -> HashSet<Position> {
+        let mut result = HashSet::new();
+        let mut to_positions = self.one_jumpable_positions(position);
+        loop {
+            if to_positions.is_empty() {
+                break;
+            }
+            for p in to_positions.iter() {
+                result.insert(*p);
+            }
+            to_positions = to_positions
+                .iter()
+                .map(|p| self.one_jumpable_positions(&p))
+                .flatten()
+                .filter(|p| !result.contains(p))
+                .collect();
+        }
+        result
+    }
+
+    fn one_jumpable_positions(&self, position: &Position) -> HashSet<Position> {
+        self.get_valid_neighbors(position)
+            .iter()
+            .filter(|&p| self.is_occupied(p))
+            .map(|p| self.opposite(p, position))
+            .filter(|p| p.is_some_and(|p| !self.is_occupied(&p)))
+            .map(|p| p.unwrap())
+            .collect::<HashSet<Position>>()
+    }
+
+    pub fn get_player_state(&self, name: &str) -> &PlayerState {
+        &self
+            .state
+            .get(name)
+            .expect(&format!("Player {name} is not found in the game."))
     }
 }
