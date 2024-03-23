@@ -87,7 +87,7 @@ impl Screen {
         for color in done_player_colors {
             self.pen
                 .queue(cursor::MoveRight(1))?
-                .queue(style::PrintStyledContent("\u{2B24}".with(*color)))?;
+                .queue(style::PrintStyledContent("⬤".with(*color)))?;
         }
         self.pen.flush()?;
         Ok(())
@@ -105,7 +105,7 @@ impl Screen {
     fn handle_position(
         &mut self,
         position: &Position,
-        content: char,
+        content: &str,
         color: Option<Color>,
         flush: bool,
     ) -> io::Result<()> {
@@ -123,7 +123,7 @@ impl Screen {
     }
 
     pub fn fill(&mut self, position: &Position, color: Color, flush: bool) -> io::Result<()> {
-        self.handle_position(position, '\u{2B24}', Some(color), flush)?;
+        self.handle_position(position, "●", Some(color), flush)?;
         Ok(())
     }
 
@@ -133,7 +133,7 @@ impl Screen {
         color: Option<Color>,
         flush: bool,
     ) -> io::Result<()> {
-        self.handle_position(position, '\u{2B55}', color, flush)?;
+        self.handle_position(position, "○", color, flush)?;
         Ok(())
     }
 

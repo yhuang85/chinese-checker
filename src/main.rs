@@ -10,12 +10,12 @@ pub mod tui;
 fn main() {
     let mut cc = game::ChineseChecker::new(4);
     let players = vec![
-        Player::new(String::from("Green"), Color::Green, 0),
-        Player::new(String::from("Red"), Color::Red, 1),
-        Player::new(String::from("Blue"), Color::Blue, 2),
-        Player::new(String::from("Yellow"), Color::Yellow, 3),
-        Player::new(String::from("White"), Color::White, 4),
-        Player::new(String::from("Magenta"), Color::Magenta, 5),
+        Player::new(String::from("Green"), Color::DarkGreen, 0),
+        Player::new(String::from("Red"), Color::DarkRed, 1),
+        Player::new(String::from("Blue"), Color::DarkBlue, 2),
+        Player::new(String::from("Yellow"), Color::DarkYellow, 3),
+        Player::new(String::from("White"), Color::DarkCyan, 4),
+        Player::new(String::from("Magenta"), Color::DarkMagenta, 5),
     ];
 
     for player in players.iter() {
